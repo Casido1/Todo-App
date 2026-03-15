@@ -191,7 +191,7 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="gradient-text tracking-tighter"
         >
-          Goaly
+          Goals
         </motion.h1>
         <motion.p 
           initial={{ opacity: 0 }}
