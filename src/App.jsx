@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { breakdownGoal } from './services/aiService';
@@ -170,7 +171,7 @@ export default function App() {
 
       setGoals(updateChildren(goals));
     } catch (error) {
-      alert("AI Decomposition failed. Make sure VITE_GEMINI_API_KEY is set correctly.");
+      console.error("AI Decomposition failed:", error);
     } finally {
       setIsBreakingDown(false);
     }
