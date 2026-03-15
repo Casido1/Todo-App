@@ -1,0 +1,86 @@
+:root {
+  --font-main: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* Color Palette - Premium & Vibrant */
+  --bg-dark: #0a0a0c;
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --accent-gold: linear-gradient(135deg, #f6d365 0%, #fda085 100%); /* Yearly */
+  --accent-purple: linear-gradient(135deg, #667eea 0%, #764ba2 100%); /* Monthly */
+  --accent-teal: linear-gradient(135deg, #2af598 0%, #009efd 100%); /* Weekly */
+  --accent-pink: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%); /* Daily */
+  
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+body {
+  font-family: var(--font-main);
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  box-shadow: var(--glass-shadow);
+  padding: 1.5rem;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card:active {
+  transform: scale(0.98);
+}
+
+h1, h2, h3 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.gradient-text {
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.btn-primary {
+  background: white;
+  color: black;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:active {
+  transform: scale(0.95);
+  opacity: 0.9;
+}
+
+/* Goals hierarchy colors */
+.goal-yearly { background: var(--accent-gold); }
+.goal-monthly { background: var(--accent-purple); }
+.goal-weekly { background: var(--accent-teal); }
+.goal-daily { background: var(--accent-pink); }
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
