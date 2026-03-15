@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { breakdownGoal } from './services/aiService';
 
 const GOAL_TYPES = {
   YEARLY: 'yearly',
@@ -149,12 +149,16 @@ export default function App() {
     setIsBreakingDown(true);
     const nextType = NEXT_TYPE[parentGoal.type];
     
-    setTimeout(() => {
-      const subGoals = [
-        { id: Date.now() + 1, title: `Foundation of ${parentGoal.title}`, type: nextType, completed: false, children: [] },
-        { id: Date.now() + 2, title: `Execution of ${parentGoal.title}`, type: nextType, completed: false, children: [] },
-        { id: Date.now() + 3, title: `Refinement of ${parentGoal.title}`, type: nextType, completed: false, children: [] }
-      ];
+    try {
+      const subGoalTitles = await breakdownGoal(parentGoal.title, parentGoal.type, nextType);
+      
+      const subGoals = subGoalTitles.map((title, index) => ({
+        id: Date.now() + index,
+        title: title,
+        type: nextType,
+        completed: false,
+        children: []
+      }));
 
       const updateChildren = (list) => {
         return list.map(g => {
@@ -165,8 +169,11 @@ export default function App() {
       };
 
       setGoals(updateChildren(goals));
+    } catch (error) {
+      alert("AI Decomposition failed. Make sure VITE_GEMINI_API_KEY is set correctly.");
+    } finally {
       setIsBreakingDown(false);
-    }, 2000);
+    }
   };
 
   return (
