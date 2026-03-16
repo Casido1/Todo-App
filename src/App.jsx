@@ -1,7 +1,184 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle, Settings, X, Save, Key } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle, Settings, X, Save, Key, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { breakdownGoal } from './services/aiService';
+
+// Helper: filter goal tree to a specific depth
+const DEPTH_ORDER = ['yearly', 'monthly', 'weekly', 'daily'];
+
+const filterGoalToDepth = (goal, maxDepth) => {
+  const goalDepthIndex = DEPTH_ORDER.indexOf(goal.type);
+  const maxDepthIndex = DEPTH_ORDER.indexOf(maxDepth);
+  const filtered = { ...goal };
+  if (goalDepthIndex >= maxDepthIndex || !goal.children?.length) {
+    filtered.children = [];
+  } else {
+    filtered.children = goal.children.map(c => filterGoalToDepth(c, maxDepth));
+  }
+  return filtered;
+};
+
+// Recursive print-friendly goal tree
+const PrintGoalNode = ({ goal, depth = 0 }) => {
+  const typeColors = { yearly: '#FFD700', monthly: '#A855F7', weekly: '#06B6D4', daily: '#F43F5E' };
+  return (
+    <div style={{ marginLeft: depth * 24, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{
+          background: typeColors[goal.type] || '#888',
+          color: '#000',
+          fontSize: 10,
+          fontWeight: 800,
+          textTransform: 'uppercase',
+          padding: '3px 10px',
+          borderRadius: 20,
+          letterSpacing: '0.05em'
+        }}>
+          {goal.type}
+        </span>
+        <span style={{
+          fontSize: depth === 0 ? 18 : 14,
+          fontWeight: depth === 0 ? 700 : 500,
+          color: '#111',
+          textDecoration: goal.completed ? 'line-through' : 'none',
+          opacity: goal.completed ? 0.4 : 1
+        }}>
+          {goal.completed ? '✓ ' : '○ '}{goal.title}
+        </span>
+      </div>
+      {goal.children?.map(child => (
+        <PrintGoalNode key={child.id} goal={child} depth={depth + 1} />
+      ))}
+    </div>
+  );
+};
+
+// Print Preview Modal
+const PrintPreview = ({ goal, onClose }) => {
+  const printRef = useRef(null);
+  const [printDepth, setPrintDepth] = useState('daily');
+
+  const depthOptions = [];
+  const goalIndex = DEPTH_ORDER.indexOf(goal.type);
+  for (let i = goalIndex; i < DEPTH_ORDER.length; i++) {
+    depthOptions.push(DEPTH_ORDER[i]);
+  }
+
+  const filteredGoal = filterGoalToDepth(goal, printDepth);
+
+  const handlePrint = () => {
+    const content = printRef.current;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Goals - ${goal.title}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+          <style>
+            body { font-family: 'Outfit', sans-serif; padding: 40px; color: #111; }
+            h1 { font-size: 24px; margin-bottom: 8px; }
+            .meta { color: #666; font-size: 13px; margin-bottom: 24px; }
+            @media print { body { padding: 20px; } }
+          </style>
+        </head>
+        <body>
+          <h1>🎯 ${goal.title}</h1>
+          <p class="meta">Printed on ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} · Depth: ${printDepth}</p>
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 16px 0 24px;">
+          ${content.innerHTML}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    setTimeout(() => { printWindow.print(); }, 500);
+  };
+
+  const depthLabels = {
+    yearly: 'This goal only',
+    monthly: 'Down to months',
+    weekly: 'Down to weeks',
+    daily: 'Full breakdown (days)'
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[70] flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: 0.9, opacity: 0, y: 20 }}
+        className="glass-card w-full max-w-lg relative overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full z-10"
+        >
+          <X className="w-6 h-6 text-white/40" />
+        </button>
+
+        <div className="flex items-center gap-4 mb-6">
+          <div className="p-3 bg-cyan-400/10 rounded-2xl">
+            <Printer className="w-6 h-6 text-cyan-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold">Print Goal</h2>
+            <p className="text-white/40 text-sm">Select detail level for PDF</p>
+          </div>
+        </div>
+
+        {/* Depth Selector */}
+        <div className="space-y-2 mb-6">
+          <label className="block text-xs font-black uppercase tracking-widest text-white/30 mb-3 ml-2">
+            Print Depth
+          </label>
+          {depthOptions.map(d => (
+            <button
+              key={d}
+              onClick={() => setPrintDepth(d)}
+              className="w-full text-left px-5 py-4 rounded-2xl transition-all flex items-center justify-between"
+              style={{
+                background: printDepth === d ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255,255,255,0.03)',
+                border: printDepth === d ? '1px solid rgba(6, 182, 212, 0.3)' : '1px solid rgba(255,255,255,0.05)'
+              }}
+            >
+              <span className="font-semibold text-sm">{depthLabels[d]}</span>
+              {printDepth === d && <span className="text-cyan-400 text-xs font-bold">✓ Selected</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Print Preview Area */}
+        <div
+          style={{
+            background: '#fafafa',
+            borderRadius: 16,
+            padding: 20,
+            maxHeight: '30vh',
+            overflowY: 'auto',
+            marginBottom: 16,
+            color: '#111'
+          }}
+        >
+          <div ref={printRef}>
+            <PrintGoalNode goal={filteredGoal} />
+          </div>
+        </div>
+
+        <button onClick={handlePrint} className="btn-commit w-full">
+          <Printer className="w-5 h-5" />
+          Print as PDF
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+};
 
 const GOAL_TYPES = {
   YEARLY: 'yearly',
@@ -31,7 +208,7 @@ const AmbientBackground = () => (
   </div>
 );
 
-const GoalItem = ({ goal, onBreakdown, toggleComplete, depth = 0 }) => {
+const GoalItem = ({ goal, onBreakdown, toggleComplete, onPrint, depth = 0 }) => {
   const [isExpanded, setIsExpanded] = useState(goal.children?.length > 0);
 
   // Auto-expand when children are added (e.g., after AI breakdown)
@@ -78,11 +255,21 @@ const GoalItem = ({ goal, onBreakdown, toggleComplete, depth = 0 }) => {
           </h3>
         </div>
 
-        {goal.children && goal.children.length > 0 && (
-          <button className={`p-2 transition-transform duration-500 ${isExpanded ? 'rotate-180' : ''}`}>
-            <ChevronDown className="w-6 h-6 opacity-30" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {goal.children?.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onPrint(goal); }}
+              className="p-2 hover:bg-white/5 rounded-full transition-all"
+            >
+              <Printer className="w-5 h-5 opacity-20 hover:opacity-50" />
+            </button>
+          )}
+          {goal.children && goal.children.length > 0 && (
+            <button className={`p-2 transition-transform duration-500 ${isExpanded ? 'rotate-180' : ''}`}>
+              <ChevronDown className="w-6 h-6 opacity-30" />
+            </button>
+          )}
+        </div>
       </div>
 
       {!goal.completed && !goal.children?.length && goal.type !== GOAL_TYPES.DAILY && (
@@ -110,7 +297,8 @@ const GoalItem = ({ goal, onBreakdown, toggleComplete, depth = 0 }) => {
                 key={child.id} 
                 goal={child} 
                 onBreakdown={onBreakdown} 
-                toggleComplete={toggleComplete} 
+                toggleComplete={toggleComplete}
+                onPrint={onPrint} 
                 depth={depth + 1}
               />
             ))}
@@ -128,6 +316,7 @@ export default function App() {
   const [isBreakingDown, setIsBreakingDown] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('GEMINI_API_KEY') || '');
+  const [printGoal, setPrintGoal] = useState(null);
 
   const saveApiKey = () => {
     localStorage.setItem('OPENROUTER_API_KEY', apiKeyInput);
@@ -256,6 +445,7 @@ export default function App() {
               goal={goal} 
               onBreakdown={handleBreakdown}
               toggleComplete={toggleComplete}
+              onPrint={setPrintGoal}
             />
           ))}
         </AnimatePresence>
@@ -358,6 +548,13 @@ export default function App() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Print Preview Modal */}
+      <AnimatePresence>
+        {printGoal && (
+          <PrintPreview goal={printGoal} onClose={() => setPrintGoal(null)} />
         )}
       </AnimatePresence>
     </div>
