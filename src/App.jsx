@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle, Settings, X, Save, Key } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { breakdownGoal } from './services/aiService';
 
@@ -32,7 +32,14 @@ const AmbientBackground = () => (
 );
 
 const GoalItem = ({ goal, onBreakdown, toggleComplete, depth = 0 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(goal.children?.length > 0);
+
+  // Auto-expand when children are added (e.g., after AI breakdown)
+  useEffect(() => {
+    if (goal.children?.length > 0) {
+      setIsExpanded(true);
+    }
+  }, [goal.children?.length]);
   const accent = TYPE_GRADIENTS[goal.type];
 
   return (
@@ -119,6 +126,13 @@ export default function App() {
   const [inputValue, setInputValue] = useState('');
   const [selectedType, setSelectedType] = useState(GOAL_TYPES.YEARLY);
   const [isBreakingDown, setIsBreakingDown] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('GEMINI_API_KEY') || '');
+
+  const saveApiKey = () => {
+    localStorage.setItem('OPENROUTER_API_KEY', apiKeyInput);
+    setIsSettingsOpen(false);
+  };
 
   const addGoal = (e) => {
     e.preventDefault();
@@ -152,6 +166,7 @@ export default function App() {
     
     try {
       const subGoalTitles = await breakdownGoal(parentGoal.title, parentGoal.type, nextType);
+      console.log('AI returned sub-goals:', subGoalTitles);
       
       const subGoals = subGoalTitles.map((title, index) => ({
         id: Date.now() + index,
@@ -169,7 +184,8 @@ export default function App() {
         });
       };
 
-      setGoals(updateChildren(goals));
+      // Use functional setState to avoid stale closure
+      setGoals(prevGoals => updateChildren(prevGoals));
     } catch (error) {
       console.error("AI Decomposition failed:", error);
     } finally {
@@ -181,13 +197,22 @@ export default function App() {
     <div className="app-container">
       <AmbientBackground />
       
-      <header>
-        <motion.h1 initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-          Goals
-        </motion.h1>
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
-          Master your time with AI
-        </motion.p>
+      <header className="flex justify-between items-center mb-16">
+        <div className="w-10"></div> {/* Spacer for symmetry */}
+        <div className="text-center">
+          <motion.h1 initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
+            Goals
+          </motion.h1>
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+            Master your time with AI
+          </motion.p>
+        </div>
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all"
+        >
+          <Settings className="w-6 h-6 text-white/40" />
+        </button>
       </header>
 
       <section className="mb-16">
@@ -271,6 +296,70 @@ export default function App() {
       </AnimatePresence>
       
       <div className="safe-area-bottom" />
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[60] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="glass-card w-full max-w-md relative"
+            >
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full"
+              >
+                <X className="w-6 h-6 text-white/40" />
+              </button>
+
+              <div className="flex items-center gap-4 mb-8">
+                <div className="p-3 bg-amber-400/10 rounded-2xl">
+                  <Key className="w-6 h-6 text-amber-400" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold">API Settings</h2>
+                  <p className="text-white/40 text-sm">Configure your OpenRouter key</p>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-xs font-black uppercase tracking-widest text-white/30 mb-3 ml-2">
+                    OpenRouter API Key
+                  </label>
+                  <div className="input-container mb-0">
+                    <input 
+                      type="password"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      placeholder="Paste your key here..."
+                      className="input-field text-sm"
+                    />
+                  </div>
+                  <p className="mt-4 text-xs text-white/20 leading-relaxed px-2">
+                    Your key is stored locally in your browser. It is never sent to our servers.
+                  </p>
+                </div>
+
+                <button 
+                  onClick={saveApiKey}
+                  className="btn-commit w-full"
+                >
+                  <Save className="w-5 h-5" />
+                  Save Configuration
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
