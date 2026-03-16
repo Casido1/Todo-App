@@ -387,7 +387,12 @@ export default function App() {
       <AmbientBackground />
       
       <header className="flex justify-between items-center mb-16">
-        <div className="w-10"></div> {/* Spacer for symmetry */}
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all"
+        >
+          <Settings className="w-6 h-6 text-white/40" />
+        </button>
         <div className="text-center">
           <motion.h1 initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
             Goals
@@ -396,12 +401,7 @@ export default function App() {
             Master your time with AI
           </motion.p>
         </div>
-        <button 
-          onClick={() => setIsSettingsOpen(true)}
-          className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all"
-        >
-          <Settings className="w-6 h-6 text-white/40" />
-        </button>
+        <div className="w-10"></div> {/* Spacer for symmetry */}
       </header>
 
       <section className="mb-16">
