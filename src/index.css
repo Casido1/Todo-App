@@ -87,6 +87,7 @@ header h1 {
   letter-spacing: -0.06em;
   margin-bottom: 0.5rem;
   background: linear-gradient(to bottom, #fff 40%, rgba(255,255,255,0.4));
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -233,6 +234,9 @@ header p {
   font-weight: 700;
   line-height: 1.3;
   color: #FFFFFF;
+  word-break: break-word; /* Allows long words to break and wrap to the next line */
+  white-space: pre-wrap;  /* Preserves white space but allows wrapping */
+  overflow-wrap: anywhere; /* Ensures text wraps even mid-word if necessary to prevent overflow */
 }
 
 .btn-breakdown-spacious {

@@ -25,6 +25,11 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  // Only cache GET requests. POST requests (like API calls to OpenRouter) cannot be cached.
+  if (event.request.method !== 'GET') {
+    return; // Let the browser handle the request normally
+  }
+
   // Network first — always try to get the latest from the server
   event.respondWith(
     fetch(event.request)
@@ -45,4 +50,28 @@ self.addEventListener('message', event => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+self.addEventListener('notificationclick', event => {
+  console.log('Notification click received.');
+  
+  event.notification.close();
+
+  // Try to open/focus the app
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      // Check if there is already a window/tab open with the target URL
+      for (let i = 0; i < windowClients.length; i++) {
+        let client = windowClients[i];
+        // If so, just focus it.
+        if (client.url === event.notification.data?.url || client.url.startsWith(self.registration.scope) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      // If not, then open the target URL in a new window/tab.
+      if (clients.openWindow) {
+        return clients.openWindow(event.notification.data?.url || '/');
+      }
+    })
+  );
 });

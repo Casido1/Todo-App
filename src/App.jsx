@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle, Settings, X, Save, Key, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { breakdownGoal } from './services/aiService';
+import { requestNotificationPermission, scheduleGoalReminder, cancelGoalReminder } from './services/notificationService';
 
 // Helper: filter goal tree to a specific depth
 const DEPTH_ORDER = ['yearly', 'monthly', 'weekly', 'daily'];
@@ -216,7 +217,16 @@ const GoalItem = ({ goal, onBreakdown, toggleComplete, onPrint, depth = 0 }) => 
     if (goal.children?.length > 0) {
       setIsExpanded(true);
     }
-  }, [goal.children?.length]);
+    
+    // If it's a daily goal and not completed, schedule a reminder
+    if (goal.type === GOAL_TYPES.DAILY && !goal.completed) {
+      scheduleGoalReminder(goal);
+    } else if (goal.completed) {
+      cancelGoalReminder(goal.id);
+    }
+
+    return () => cancelGoalReminder(goal.id);
+  }, [goal.children?.length, goal.completed, goal.type, goal.id, goal]);
   const accent = TYPE_GRADIENTS[goal.type];
 
   return (
@@ -318,12 +328,17 @@ export default function App() {
   const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('GEMINI_API_KEY') || '');
   const [printGoal, setPrintGoal] = useState(null);
 
+  useEffect(() => {
+    // Request notification permission when the app loads
+    requestNotificationPermission();
+  }, []);
+
   const saveApiKey = () => {
     localStorage.setItem('OPENROUTER_API_KEY', apiKeyInput);
     setIsSettingsOpen(false);
   };
 
-  const addGoal = (e) => {
+  const addGoal = async (e) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
     
@@ -335,8 +350,66 @@ export default function App() {
       children: []
     };
     
-    setGoals([newGoal, ...goals]);
+    setGoals(prev => [newGoal, ...prev]);
     setInputValue('');
+
+    // Ensure we have notification permissions if they haven't been granted yet
+    requestNotificationPermission();
+
+    // Auto-breakdown down to DAILY goals
+    if (newGoal.type !== GOAL_TYPES.DAILY) {
+      await autoBreakdownToDaily(newGoal);
+    }
+  };
+
+  const autoBreakdownToDaily = async (goal) => {
+    if (goal.type === GOAL_TYPES.DAILY) return;
+    
+    setIsBreakingDown(true);
+    try {
+      let currentGoal = goal;
+      let currentType = goal.type;
+      
+      // We will perform the breakdown recursively but we need to update the state after each step
+      // To simulate the user clicking breakdown on the new children, we recursively process them.
+      await performRecursiveBreakdown([currentGoal]);
+    } finally {
+      setIsBreakingDown(false);
+    }
+  };
+
+  const performRecursiveBreakdown = async (goalsToBreakdown) => {
+    for (const g of goalsToBreakdown) {
+      if (g.type === GOAL_TYPES.DAILY) continue;
+      
+      const nextType = NEXT_TYPE[g.type];
+      const subGoalTitles = await breakdownGoal(g.title, g.type, nextType);
+      
+      const subGoals = subGoalTitles.map((title, index) => ({
+        id: Date.now() + Math.random(), // Ensure unique IDs
+        title: title,
+        type: nextType,
+        completed: false,
+        children: []
+      }));
+
+      // Update state for this specific goal's children
+      setGoals(prevGoals => {
+        const updateChildren = (list) => {
+          return list.map(item => {
+            if (item.id === g.id) return { ...item, children: subGoals };
+            if (item.children) return { ...item, children: updateChildren(item.children) };
+            return item;
+          });
+        };
+        return updateChildren(prevGoals);
+      });
+
+      // Recurse into the new children
+      if (nextType !== GOAL_TYPES.DAILY) {
+        await performRecursiveBreakdown(subGoals);
+      }
+    }
   };
 
   const toggleComplete = (id, goalList = goals) => {
@@ -358,7 +431,7 @@ export default function App() {
       console.log('AI returned sub-goals:', subGoalTitles);
       
       const subGoals = subGoalTitles.map((title, index) => ({
-        id: Date.now() + index,
+        id: Date.now() + Math.random(), // Ensure unique IDs
         title: title,
         type: nextType,
         completed: false,
@@ -375,6 +448,12 @@ export default function App() {
 
       // Use functional setState to avoid stale closure
       setGoals(prevGoals => updateChildren(prevGoals));
+
+      // After a manual breakdown, if it's not daily, auto-breakdown the new children to daily
+      if (nextType !== GOAL_TYPES.DAILY) {
+         await performRecursiveBreakdown(subGoals);
+      }
+
     } catch (error) {
       console.error("AI Decomposition failed:", error);
     } finally {
