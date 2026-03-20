@@ -99,21 +99,13 @@ You must use these exact days: ${exactDays.map(d => d.split(' ')[0]).join(', ')}
 
 export const breakdownGoal = async (goalTitle, currentType, nextType) => {
   // Use OpenRouter key from localStorage or env
-  const localKey = localStorage.getItem('OPENROUTER_API_KEY');
+  const localKey = localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
   const apiKey = localKey || import.meta.env.VITE_OPENROUTER_API_KEY;
 
   const timeCtx = getTimeContext(currentType);
 
   if (!apiKey) {
-    console.warn("OpenRouter API Key missing. Falling back to simulation mode.");
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    return timeCtx.labels.length > 0
-      ? timeCtx.labels.map(label => `${label}: Action item for ${goalTitle}`)
-      : [
-          `Strategic ${nextType} tasks for ${goalTitle}`,
-          `Execution phase for ${goalTitle}`,
-          `Review and optimize ${goalTitle} progress`
-        ];
+    throw new Error("Missing OpenRouter API Key. Please click the Settings (gear) icon in the top right to configure your key.");
   }
 
   const prompt = `
@@ -162,13 +154,7 @@ Do not include any other text, markdown formatting, or code blocks.
     return parsed;
   } catch (error) {
     console.error("OpenRouter breakdown failed:", error);
-    // Fallback to time-aware simulation
-    return timeCtx.labels.length > 0
-      ? timeCtx.labels.map(label => `${label}: Action item for ${goalTitle}`)
-      : [
-          `Strategic ${nextType} tasks for ${goalTitle}`,
-          `Execution phase for ${goalTitle}`,
-          `Review and optimize ${goalTitle} progress`
-        ];
+    // Instead of silently falling back, throw the error so the UI can notify the user
+    throw new Error(error.message || "Failed to connect to the AI service. Please check your connection or API key.");
   }
 };

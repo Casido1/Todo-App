@@ -2,7 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, ChevronDown, ChevronRight, Zap, Target, Calendar, Clock, CheckCircle2, Circle, Sparkles, AlertCircle, Settings, X, Save, Key, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { breakdownGoal } from './services/aiService';
-import { requestNotificationPermission, scheduleGoalReminder, cancelGoalReminder } from './services/notificationService';
+import { requestNotificationPermission, scheduleGoalReminder, cancelGoalReminder, showNotification } from './services/notificationService';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
+import GoalPDFTemplate from './components/GoalPDFTemplate';
 
 // Helper: filter goal tree to a specific depth
 const DEPTH_ORDER = ['yearly', 'monthly', 'weekly', 'daily'];
@@ -209,24 +212,19 @@ const AmbientBackground = () => (
   </div>
 );
 
-const GoalItem = ({ goal, onBreakdown, toggleComplete, onPrint, depth = 0 }) => {
-  const [isExpanded, setIsExpanded] = useState(goal.children?.length > 0);
-
-  // Auto-expand when children are added (e.g., after AI breakdown)
+const GoalItem = ({ goal, toggleComplete, onPrint }) => {
   useEffect(() => {
-    if (goal.children?.length > 0) {
-      setIsExpanded(true);
+    // If completed, cancel reminders (though Daily goals are mainly hidden now, 
+    // we keep this in case the user completes the top level goal and we want to cancel all its children)
+    if (goal.completed) {
+      const cancelAllReminders = (node) => {
+         if (node.type === GOAL_TYPES.DAILY) cancelGoalReminder(node.id);
+         if (node.children) node.children.forEach(cancelAllReminders);
+      };
+      cancelAllReminders(goal);
     }
-    
-    // If it's a daily goal and not completed, schedule a reminder
-    if (goal.type === GOAL_TYPES.DAILY && !goal.completed) {
-      scheduleGoalReminder(goal);
-    } else if (goal.completed) {
-      cancelGoalReminder(goal.id);
-    }
+  }, [goal.completed, goal]);
 
-    return () => cancelGoalReminder(goal.id);
-  }, [goal.children?.length, goal.completed, goal.type, goal.id, goal]);
   const accent = TYPE_GRADIENTS[goal.type];
 
   return (
@@ -236,9 +234,9 @@ const GoalItem = ({ goal, onBreakdown, toggleComplete, onPrint, depth = 0 }) => 
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.6, ease: [0.23, 1, 0.32, 1] }}
-      className={`glass-card goal-card-premium ${isExpanded ? 'active' : ''}`}
+      className="glass-card goal-card-premium"
     >
-      <div className="goal-header" onClick={() => goal.children?.length > 0 && setIsExpanded(!isExpanded)}>
+      <div className="goal-header">
         <button 
           onClick={(e) => { e.stopPropagation(); toggleComplete(goal.id); }}
           className="mt-1 flex-shrink-0"
@@ -270,51 +268,13 @@ const GoalItem = ({ goal, onBreakdown, toggleComplete, onPrint, depth = 0 }) => 
             <button
               onClick={(e) => { e.stopPropagation(); onPrint(goal); }}
               className="p-2 hover:bg-white/5 rounded-full transition-all"
+              title="Print Goal Tree"
             >
               <Printer className="w-5 h-5 opacity-20 hover:opacity-50" />
             </button>
           )}
-          {goal.children && goal.children.length > 0 && (
-            <button className={`p-2 transition-transform duration-500 ${isExpanded ? 'rotate-180' : ''}`}>
-              <ChevronDown className="w-6 h-6 opacity-30" />
-            </button>
-          )}
         </div>
       </div>
-
-      {!goal.completed && !goal.children?.length && goal.type !== GOAL_TYPES.DAILY && (
-        <motion.button 
-          whileHover={{ scale: 1.02, background: 'rgba(255,255,255,0.08)' }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => onBreakdown(goal)}
-          className="btn-breakdown-spacious"
-        >
-          <Sparkles className="w-5 h-5 text-amber-400" />
-          AI Breakdown to {NEXT_TYPE[goal.type]}
-        </motion.button>
-      )}
-
-      <AnimatePresence>
-        {isExpanded && goal.children?.length > 0 && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="mt-8 ml-4 pl-8 border-l-2 border-white/5 space-y-6"
-          >
-            {goal.children.map(child => (
-              <GoalItem 
-                key={child.id} 
-                goal={child} 
-                onBreakdown={onBreakdown} 
-                toggleComplete={toggleComplete}
-                onPrint={onPrint} 
-                depth={depth + 1}
-              />
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 };
@@ -327,6 +287,10 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(localStorage.getItem('OPENROUTER_API_KEY') || localStorage.getItem('GEMINI_API_KEY') || '');
   const [printGoal, setPrintGoal] = useState(null);
+  
+  // State for Auto-PDF Generation
+  const [pdfGoalTarget, setPdfGoalTarget] = useState(null);
+  const pdfRef = useRef(null);
 
   useEffect(() => {
     // Request notification permission when the app loads
@@ -353,63 +317,109 @@ export default function App() {
     setGoals(prev => [newGoal, ...prev]);
     setInputValue('');
 
-    // Ensure we have notification permissions if they haven't been granted yet
     requestNotificationPermission();
 
-    // Auto-breakdown down to DAILY goals
     if (newGoal.type !== GOAL_TYPES.DAILY) {
-      await autoBreakdownToDaily(newGoal);
+      autoBreakdownToDaily(newGoal);
     }
   };
 
   const autoBreakdownToDaily = async (goal) => {
     if (goal.type === GOAL_TYPES.DAILY) return;
     
-    setIsBreakingDown(true);
     try {
-      let currentGoal = goal;
-      let currentType = goal.type;
+      // 1. Build the full plan silently in the background
+      const fullyExpandedGoal = await buildGoalTree(goal);
       
-      // We will perform the breakdown recursively but we need to update the state after each step
-      // To simulate the user clicking breakdown on the new children, we recursively process them.
-      await performRecursiveBreakdown([currentGoal]);
-    } finally {
-      setIsBreakingDown(false);
+      // 2. Schedule all daily reminders automatically 
+      const scheduleTree = (node) => {
+        if (node.type === GOAL_TYPES.DAILY && !node.completed) scheduleGoalReminder(node);
+        if (node.children) node.children.forEach(scheduleTree);
+      };
+      scheduleTree(fullyExpandedGoal);
+      
+      // 3. Attach the completed background tree to the main goal so the PDF can access it
+      setGoals(currentGoals => currentGoals.map(g => 
+        g.id === goal.id ? fullyExpandedGoal : g
+      ));
+      
+      // 4. Count daily goals and notify user
+      const countDailyGoals = (node) => {
+        if (node.type === GOAL_TYPES.DAILY) return 1;
+        return (node.children || []).reduce((sum, child) => sum + countDailyGoals(child), 0);
+      };
+      const dailyCount = countDailyGoals(fullyExpandedGoal);
+      showNotification('Goal Breakdown Complete', {
+        body: `"${goal.title}" has been broken down into ${dailyCount} daily goals. Your schedule is ready!`,
+        tag: 'breakdown-complete'
+      });
+      
+      // 5. Filter to show only one level down for PDF
+      const oneLevelDown = NEXT_TYPE[goal.type];
+      const pdfGoal = filterGoalToDepth(fullyExpandedGoal, oneLevelDown);
+      
+      // 6. Trigger PDF Generation silently
+      setPdfGoalTarget(pdfGoal);
+      setTimeout(() => generatePDF(pdfGoal.title), 1500);
+      
+    } catch (error) {
+       console.error("Auto-breakdown interrupted or failed.", error);
+       alert(`AI Breakdown Failed: ${error.message}`);
     }
   };
 
-  const performRecursiveBreakdown = async (goalsToBreakdown) => {
-    for (const g of goalsToBreakdown) {
-      if (g.type === GOAL_TYPES.DAILY) continue;
-      
-      const nextType = NEXT_TYPE[g.type];
-      const subGoalTitles = await breakdownGoal(g.title, g.type, nextType);
-      
-      const subGoals = subGoalTitles.map((title, index) => ({
-        id: Date.now() + Math.random(), // Ensure unique IDs
-        title: title,
-        type: nextType,
-        completed: false,
-        children: []
-      }));
-
-      // Update state for this specific goal's children
-      setGoals(prevGoals => {
-        const updateChildren = (list) => {
-          return list.map(item => {
-            if (item.id === g.id) return { ...item, children: subGoals };
-            if (item.children) return { ...item, children: updateChildren(item.children) };
-            return item;
-          });
-        };
-        return updateChildren(prevGoals);
+  const generatePDF = async (goalTitle) => {
+    if (!pdfRef.current) return;
+    try {
+      const canvas = await html2canvas(pdfRef.current, {
+        scale: 2, // High resolution
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff'
       });
-
-      // Recurse into the new children
-      if (nextType !== GOAL_TYPES.DAILY) {
-        await performRecursiveBreakdown(subGoals);
-      }
+      
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Calculate PDF dimensions (A4 size is 210x297mm)
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Goal_Plan_${goalTitle.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+      
+      // Clear the target so it doesn't linger
+      setPdfGoalTarget(null);
+    } catch (error) {
+      console.error("Failed to generate PDF:", error);
     }
+  };
+
+  const buildGoalTree = async (currentGoal) => {
+    if (currentGoal.type === GOAL_TYPES.DAILY) return currentGoal;
+    
+    const nextType = NEXT_TYPE[currentGoal.type];
+    const subGoalTitles = await breakdownGoal(currentGoal.title, currentGoal.type, nextType);
+    
+    const subGoals = subGoalTitles.map(title => ({
+      id: crypto.randomUUID(),
+      title: title,
+      type: nextType,
+      completed: false,
+      children: []
+    }));
+
+    const expandedChildren = [];
+    for (const sg of subGoals) {
+       expandedChildren.push(await buildGoalTree(sg));
+    }
+
+    return { ...currentGoal, children: expandedChildren };
   };
 
   const toggleComplete = (id, goalList = goals) => {
@@ -422,44 +432,7 @@ export default function App() {
     return updated;
   };
 
-  const handleBreakdown = async (parentGoal) => {
-    setIsBreakingDown(true);
-    const nextType = NEXT_TYPE[parentGoal.type];
-    
-    try {
-      const subGoalTitles = await breakdownGoal(parentGoal.title, parentGoal.type, nextType);
-      console.log('AI returned sub-goals:', subGoalTitles);
-      
-      const subGoals = subGoalTitles.map((title, index) => ({
-        id: Date.now() + Math.random(), // Ensure unique IDs
-        title: title,
-        type: nextType,
-        completed: false,
-        children: []
-      }));
-
-      const updateChildren = (list) => {
-        return list.map(g => {
-          if (g.id === parentGoal.id) return { ...g, children: subGoals };
-          if (g.children) return { ...g, children: updateChildren(g.children) };
-          return g;
-        });
-      };
-
-      // Use functional setState to avoid stale closure
-      setGoals(prevGoals => updateChildren(prevGoals));
-
-      // After a manual breakdown, if it's not daily, auto-breakdown the new children to daily
-      if (nextType !== GOAL_TYPES.DAILY) {
-         await performRecursiveBreakdown(subGoals);
-      }
-
-    } catch (error) {
-      console.error("AI Decomposition failed:", error);
-    } finally {
-      setIsBreakingDown(false);
-    }
-  };
+  // handleBreakdown manual button logic completely removed as requested.
 
   return (
     <div className="app-container">
@@ -522,7 +495,6 @@ export default function App() {
             <GoalItem 
               key={goal.id} 
               goal={goal} 
-              onBreakdown={handleBreakdown}
               toggleComplete={toggleComplete}
               onPrint={setPrintGoal}
             />
@@ -541,28 +513,7 @@ export default function App() {
         )}
       </div>
 
-      <AnimatePresence>
-        {isBreakingDown && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-2xl flex items-center justify-center z-50 p-8"
-          >
-            <div className="text-center">
-              <motion.div
-                animate={{ scale: [1, 1.3, 1], rotate: [0, 180, 360] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                className="mb-8"
-              >
-                <Sparkles className="w-20 h-20 text-amber-400 mx-auto" strokeWidth={1} />
-              </motion.div>
-              <h2 className="text-3xl font-black mb-4 tracking-tight">AI Decomposing...</h2>
-              <p className="text-white/40 text-lg font-medium">Brewing clarity from complexity</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Loading Modal Removed to make breakdown silent */}
       
       <div className="safe-area-bottom" />
 
@@ -636,6 +587,11 @@ export default function App() {
           <PrintPreview goal={printGoal} onClose={() => setPrintGoal(null)} />
         )}
       </AnimatePresence>
+
+      {/* Hidden Unseen Template for Auto PDF Generation */}
+      {pdfGoalTarget && (
+         <GoalPDFTemplate ref={pdfRef} goal={pdfGoalTarget} />
+      )}
     </div>
   );
 }
